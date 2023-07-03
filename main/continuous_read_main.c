@@ -14,6 +14,7 @@
 #include "esp_adc/adc_continuous.h"
 #include "driver/gpio.h"
 #include <math.h>
+#include <pthread.h>
 
 // ADC pin GPIO 3 ADC1_CH2
 
@@ -53,9 +54,15 @@ static const char *TAG = "EXAMPLE";
 #define LEDBAR_9    13
 #define LEDBAR_10   14
 
+static pthread_mutex_t ledBarMutex;
+
 static void ledBar(uint16_t val);
 static void ledBar_setup(void)
 {
+    if(pthread_mutex_init (&ledBarMutex, NULL) != 0){
+        printf("Failed to initialize the spiffs mutex");
+    }
+
     gpio_reset_pin(SR_DS);
     gpio_reset_pin(SR_OE_);
     gpio_reset_pin(SR_STCP);
@@ -86,43 +93,49 @@ static void ledBar(uint16_t val)
 {
     if (val == lastValue)
         return;
-    lastValue = val;
 
-    gpio_set_level(SR_SHCP, 0);
-    gpio_set_level(SR_STCP, 0);
+    if (pthread_mutex_trylock(&ledBarMutex) == 0) {
 
-    printf("value = %d => ", val);
-    bool bit;
-    for (int i=0; i<8; i++) {
-        bit = (val & 0x1 << i);
-        if (i % 4 == 0) printf(" "); // space
-        printf("%s", bit? "1":"0");
-        
-        gpio_set_level(SR_DS, !bit); // invert due to wiring
-        //vTaskDelay(pdMS_TO_TICKS(SR_DELAY));
-
-        gpio_set_level(SR_SHCP, 1);
-        vTaskDelay(pdMS_TO_TICKS(SR_DELAY));   
+        lastValue = val;
 
         gpio_set_level(SR_SHCP, 0);
-        vTaskDelay(pdMS_TO_TICKS(SR_DELAY));   
+        gpio_set_level(SR_STCP, 0);
+
+        printf("value = %d => ", val);
+        bool bit;
+        for (int i=0; i<8; i++) {
+            bit = (val & 0x1 << i);
+            if (i % 4 == 0) printf(" "); // space
+            printf("%s", bit? "1":"0");
+            
+            gpio_set_level(SR_DS, !bit); // invert due to wiring
+            //vTaskDelay(pdMS_TO_TICKS(SR_DELAY));
+
+            gpio_set_level(SR_SHCP, 1);
+            vTaskDelay(pdMS_TO_TICKS(SR_DELAY));   
+
+            gpio_set_level(SR_SHCP, 0);
+            vTaskDelay(pdMS_TO_TICKS(SR_DELAY));   
+        }
+        printf(" "); // space
+
+        bit = (val & 0x1 << 9);
+        printf("%s", bit? "1":"0");
+        gpio_set_level(LEDBAR_9, !bit);
+
+        bit = (val & 0x1 << 10);
+        printf("%s", bit? "1":"0");
+        gpio_set_level(LEDBAR_10, !bit);
+        printf("\n");
+
+        gpio_set_level(SR_STCP, 1);
+        vTaskDelay(pdMS_TO_TICKS(SR_DELAY));  
+
+        gpio_set_level(SR_STCP, 0);
+        vTaskDelay(pdMS_TO_TICKS(SR_DELAY));  
+
+        pthread_mutex_unlock(&ledBarMutex);
     }
-    printf(" "); // space
-
-    bit = (val & 0x1 << 9);
-    printf("%s", bit? "1":"0");
-    gpio_set_level(LEDBAR_9, !bit);
-
-    bit = (val & 0x1 << 10);
-    printf("%s", bit? "1":"0");
-    gpio_set_level(LEDBAR_10, !bit);
-    printf("\n");
-
-    gpio_set_level(SR_STCP, 1);
-    vTaskDelay(pdMS_TO_TICKS(SR_DELAY));  
-
-    gpio_set_level(SR_STCP, 0);
-    vTaskDelay(pdMS_TO_TICKS(SR_DELAY));  
 }
 
 static void ledBarLevel(uint32_t val, uint32_t max) 
